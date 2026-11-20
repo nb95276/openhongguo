@@ -1,0 +1,57 @@
+name: update-signer-image
+
+# 每天检查官方签名镜像是否有新版本，有则部署到 Fly。
+# 上游改签名算法后，镜像维护者更新 beilunyang/openhongguo-signer:latest，
+# 这里自动跟进；手机端完全无感。
+on:
+  schedule:
+    - cron: "30 20 * * *"   # 04:30 Asia/Shanghai
+  workflow_dispatch:          # 手动触发（Actions 页面 Run workflow）
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Compare running vs latest image digest
+        id: cmp
+        run: |
+          set -euo pipefail
+          # 当前部署镜像的引用（失败时不阻塞，按"需要更新"处理）
+          RUNNING=$(flyctl image show --app hongguo-signer-nb --json 2>/dev/null \
+            | jq -r '.ImageRef // .image_ref // empty' 2>/dev/null || true)
+          # Docker Hub 上 latest 的 manifest digest
+          LATEST=$(docker manifest inspect beilunyang/openhongguo-signer:latest 2>/dev/null \
+            | jq -r '.config.digest // .manifests[0].digest // empty' 2>/dev/null || true)
+          echo "running=${RUNNING:-unknown}"
+          echo "latest=${LATEST:-unknown}"
+          if [ -n "$RUNNING" ] && [ -n "$LATEST" ] && echo "$RUNNING" | grep -q "${LATEST#sha256:}" ; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy latest signer image
+        if: steps.cmp.outputs.changed == 'true'
+        run: |
+          flyctl deploy --app hongguo-signer-nb \
+            --image beilunyang/openhongguo-signer:latest \
+            --wait-timeout 300
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Verify signer health
+        if: steps.cmp.outputs.changed == 'true'
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 8 https://hongguo-signer-nb.fly.dev/ready | grep -q '"ready":true'; then
+              echo "signer ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "signer did NOT become ready" >&2
+          exit 1
