@@ -20,10 +20,10 @@ jobs:
           set -euo pipefail
           # 当前部署镜像的引用（失败时不阻塞，按"需要更新"处理）
           RUNNING=$(flyctl image show --app hongguo-signer-nb --json 2>/dev/null \
-            | jq -r '.ImageRef // .image_ref // empty' 2>/dev/null || true)
+            | jq -r '.[0].Digest // empty' 2>/dev/null || true)
           # Docker Hub 上 latest 的 manifest digest
           LATEST=$(docker manifest inspect beilunyang/openhongguo-signer:latest 2>/dev/null \
-            | jq -r '.config.digest // .manifests[0].digest // empty' 2>/dev/null || true)
+            | jq -r '(.config.digest // ([.manifests[]? | select(.platform.architecture=="amd64" and .platform.os=="linux")][0].digest) // empty)' 2>/dev/null || true)
           echo "running=${RUNNING:-unknown}"
           echo "latest=${LATEST:-unknown}"
           if [ -n "$RUNNING" ] && [ -n "$LATEST" ] && echo "$RUNNING" | grep -q "${LATEST#sha256:}" ; then
