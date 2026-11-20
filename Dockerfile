@@ -6,6 +6,7 @@ FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /src
 COPY signer/gradlew signer/settings.gradle.kts signer/build.gradle.kts ./
 COPY signer/gradle gradle
+RUN chmod +x gradlew
 RUN ./gradlew --no-daemon -q help
 COPY signer/src src
 RUN ./gradlew --no-daemon -q installDist
